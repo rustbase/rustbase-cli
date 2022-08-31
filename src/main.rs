@@ -38,9 +38,7 @@ async fn main() -> Result<()> {
 
     let mut rl = Editor::<()>::new()?;
 
-    if rl.load_history("repl.history").is_err() {
-        println!("No previous history.");
-    }
+    rl.load_history("repl.history").ok();
 
     let client = engine::Rustbase::connect(args.host, args.port).await;
 
@@ -61,10 +59,13 @@ async fn main() -> Result<()> {
             }
             Err(ReadlineError::Interrupted) => {
                 println!("bye");
+                rl.save_history("repl.history").ok();
+
                 break;
             }
             Err(ReadlineError::Eof) => {
                 println!("bye");
+                rl.save_history("repl.history").ok();
                 break;
             }
             Err(err) => {
