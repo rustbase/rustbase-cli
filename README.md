@@ -18,9 +18,20 @@ Join our [discord server](https://discord.gg/m5ZzWPumbd) to get help and discuss
 </div>
 
 # Usage
+## Dependencies
+ -  Rustbase needs to be running on host.
+
+
 ```bash
 rustbase-cli [options]
 ```
+
+To change host or port, use `--host` and `--port` flags.
+
+```bash
+rustbase-cli --host <host> --port <port> [options]
+```
+
 
 # License
 [MIT License](./LICENSE)
