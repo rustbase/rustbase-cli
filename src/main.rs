@@ -1,9 +1,7 @@
-#[macro_use]
-extern crate pest_derive;
-
 use clap::Parser;
 
 mod engine;
+mod utils;
 
 use colored::Colorize;
 use rustyline::error::ReadlineError;
@@ -40,10 +38,12 @@ async fn main() -> Result<()> {
 
     rl.load_history("repl.history").ok();
 
-    let client = engine::Rustbase::connect(args.host, args.port).await;
+    let mut database = rl.readline("Database: ")?;
+
+    let mut client = engine::Rustbase::connect(args.host, args.port, database.clone()).await;
 
     loop {
-        let readline = rl.readline("RUSTBASE> ");
+        let readline = rl.readline(format!("{}> ", database).as_str());
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.as_str());
@@ -51,10 +51,15 @@ async fn main() -> Result<()> {
                 if line == "exit" {
                     println!("bye");
                     break;
+                } else if line.trim() == "!database" {
+                    let prompted_database = rl.readline("Database: ")?;
+                    client.database = prompted_database.clone();
+                    database = prompted_database;
+                    continue;
                 }
 
                 if !line.is_empty() {
-                    engine::parse::parse(line, client.clone()).await;
+                    client.request(engine::Request::Query(line)).await;
                 }
             }
             Err(ReadlineError::Interrupted) => {
@@ -74,5 +79,10 @@ async fn main() -> Result<()> {
             }
         }
     }
-    rl.save_history("repl.history")
+    rl.save_history(
+        utils::get_current_path()
+            .join("repl.history")
+            .to_str()
+            .unwrap(),
+    )
 }
