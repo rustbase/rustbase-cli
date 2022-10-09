@@ -1,9 +1,10 @@
+use core::panic;
+
+use colored::Colorize;
 use rustbase::rustbase_client::RustbaseClient;
-use rustbase::{Key, KeyValue};
+use rustbase::{QueryMessage, QueryResult, QueryResultType};
 use tonic::transport::Channel;
 use tonic::Code;
-
-pub mod parse;
 
 pub mod rustbase {
     tonic::include_proto!("rustbase");
@@ -11,18 +12,11 @@ pub mod rustbase {
 
 #[derive(Debug)]
 pub enum Request {
-    Get(String),
-    Insert(String, bson::Document),
-    Update(String, bson::Document),
-    Delete(String),
+    Query(String),
 }
 
-#[derive(Debug)]
 pub enum Response {
-    Get(bson::Document),
-    Insert(()),
-    Update(()),
-    Delete(()),
+    Query(QueryResult),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -45,15 +39,13 @@ impl std::fmt::Display for Error {
 #[derive(Clone)]
 pub struct Rustbase {
     pub client: RustbaseClient<Channel>,
+    pub database: String,
 }
 
 impl Rustbase {
-    pub async fn connect(host: String, port: String) -> Rustbase {
+    pub async fn connect(host: String, port: String, database: String) -> Rustbase {
         match RustbaseClient::connect(format!("http://{}:{}", host.clone(), port.clone())).await {
-            Ok(client) => {
-                println!("Connected to rustbase://{}:{}", host, port);
-                Rustbase { client }
-            }
+            Ok(client) => Rustbase { client, database },
             Err(e) => {
                 eprintln!("Cannot connect the server: {}", e);
 
@@ -62,52 +54,51 @@ impl Rustbase {
         }
     }
 
-    pub async fn request(&mut self, request: Request) -> Result<Response> {
+    pub async fn request(&mut self, request: Request) {
         match request {
-            Request::Get(key) => {
-                let response = self.client.get(Key { key }).await;
+            Request::Query(query) => {
+                let query = QueryMessage {
+                    query,
+                    database: self.database.clone(),
+                };
 
-                match response {
-                    Ok(res) => Ok(Response::Get(
-                        bson::from_slice(&res.into_inner().bson).unwrap(),
-                    )),
-                    Err(e) => Err(Error { status: e }),
-                }
-            }
-            Request::Insert(key, doc) => {
-                let response = self
-                    .client
-                    .insert(KeyValue {
-                        key,
-                        value: bson::to_vec(&doc).unwrap(),
-                    })
-                    .await;
+                let response = self.client.query(query).await.unwrap();
+                let response = response.into_inner();
 
-                match response {
-                    Ok(_) => Ok(Response::Insert(())),
-                    Err(e) => Err(Error { status: e }),
-                }
-            }
-            Request::Update(key, doc) => {
-                let response = self
-                    .client
-                    .update(KeyValue {
-                        key,
-                        value: bson::to_vec(&doc).unwrap(),
-                    })
-                    .await;
-                match response {
-                    Ok(_) => Ok(Response::Update(())),
-                    Err(e) => Err(Error { status: e }),
-                }
-            }
-            Request::Delete(key) => {
-                let response = self.client.delete(Key { key }).await;
-                match response {
-                    Ok(_) => Ok(Response::Delete(())),
-                    Err(e) => Err(Error { status: e }),
+                match parse_i32_to_enum(response.result_type) {
+                    QueryResultType::Ok => {
+                        if let Some(result) = response.bson {
+                            println!("{}", bson::from_slice::<bson::Bson>(&result).unwrap());
+                        }
+                    }
+                    QueryResultType::Error => {
+                        println!(
+                            "{} {}",
+                            "[Error]".red().bold(),
+                            response.error_message.unwrap()
+                        );
+                    }
+                    QueryResultType::NotFound => {
+                        print!("{} Not found: ", "[Error]".red().bold());
+                        if let Some(msg) = response.error_message {
+                            println!("{}", msg);
+                        }
+                    }
+                    QueryResultType::SyntaxError => {
+                        println!("[Error] Syntax: \n{}", response.error_message.unwrap());
+                    }
                 }
             }
         }
+    }
+}
+
+fn parse_i32_to_enum(num: i32) -> QueryResultType {
+    match num {
+        0 => QueryResultType::Ok,
+        1 => QueryResultType::NotFound,
+        2 => QueryResultType::Error,
+        3 => QueryResultType::SyntaxError,
+        _ => panic!("Invalid number"),
     }
 }
