@@ -15,12 +15,6 @@ pub enum Request {
     Query(String),
 }
 
-pub enum Response {
-    Query(QueryResult),
-}
-
-type Result<T> = std::result::Result<T, Error>;
-
 #[derive(Debug)]
 pub struct Error {
     status: tonic::Status,
@@ -62,30 +56,45 @@ impl Rustbase {
                     database: self.database.clone(),
                 };
 
-                let response = self.client.query(query).await.unwrap();
-                let response = response.into_inner();
+                match self.client.query(query.clone()).await {
+                    Ok(response) => {
+                        let response = response.into_inner();
 
-                match parse_i32_to_enum(response.result_type) {
-                    QueryResultType::Ok => {
-                        if let Some(result) = response.bson {
-                            println!("{}", bson::from_slice::<bson::Bson>(&result).unwrap());
+                        match parse_i32_to_enum(response.result_type) {
+                            QueryResultType::Ok => {
+                                if let Some(result) = response.bson {
+                                    let doc = bson::from_slice::<bson::Document>(&result).unwrap();
+
+                                    if let Some(value) = doc.get("_l") {
+                                        println!("{}", value);
+                                    } else {
+                                        println!("{}", doc);
+                                    }
+                                } else {
+                                    println!("{} OK", "[Success]".green());
+                                }
+                            }
+                            QueryResultType::Error => {
+                                println!(
+                                    "{} {}",
+                                    "[Error]".red().bold(),
+                                    response.error_message.unwrap()
+                                );
+                            }
+                            QueryResultType::NotFound => {
+                                print!("{} Not found: ", "[Error]".red().bold());
+                                if let Some(msg) = response.error_message {
+                                    println!("{}", msg);
+                                }
+                            }
+                            QueryResultType::SyntaxError => {
+                                println!("[Error] Syntax: \n{}", response.error_message.unwrap());
+                            }
                         }
                     }
-                    QueryResultType::Error => {
-                        println!(
-                            "{} {}",
-                            "[Error]".red().bold(),
-                            response.error_message.unwrap()
-                        );
-                    }
-                    QueryResultType::NotFound => {
-                        print!("{} Not found: ", "[Error]".red().bold());
-                        if let Some(msg) = response.error_message {
-                            println!("{}", msg);
-                        }
-                    }
-                    QueryResultType::SyntaxError => {
-                        println!("[Error] Syntax: \n{}", response.error_message.unwrap());
+
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
                     }
                 }
             }
