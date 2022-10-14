@@ -48,7 +48,13 @@ async fn main() -> Result<()> {
 
     let mut rl = Editor::<()>::new()?;
 
-    rl.load_history("repl.history").ok();
+    rl.load_history(
+        utils::get_current_path()
+            .join("repl.history")
+            .to_str()
+            .unwrap(),
+    )
+    .ok();
 
     let mut database = rl.readline("Database: ")?;
 
@@ -76,13 +82,25 @@ async fn main() -> Result<()> {
             }
             Err(ReadlineError::Interrupted) => {
                 println!("bye");
-                rl.save_history("repl.history").ok();
+                rl.save_history(
+                    utils::get_current_path()
+                        .join("repl.history")
+                        .to_str()
+                        .unwrap(),
+                )
+                .ok();
 
                 break;
             }
             Err(ReadlineError::Eof) => {
                 println!("bye");
-                rl.save_history("repl.history").ok();
+                rl.save_history(
+                    utils::get_current_path()
+                        .join("repl.history")
+                        .to_str()
+                        .unwrap(),
+                )
+                .ok();
                 break;
             }
             Err(err) => {
