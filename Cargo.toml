@@ -2,18 +2,13 @@
 name = "rustbase-cli"
 version = "0.1.2-beta"
 edition = "2021"
-build = "./src/build.rs"
 
 [dependencies]
-tonic = "0.8.0"
-prost = "0.11.0"
-tokio = { version = "1.20.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.20.1", features = ["macros", "rt-multi-thread", "net", "io-std", "io-util"] }
 bson = "2.4.0"
 rustyline = "10.0.0"
 colored = "2.0.0"
 clap = "3.2.19"
 clap_derive = "3.2.18"
 crossterm = "0.16.0"
-
-[build-dependencies]
-tonic-build = "0.8.0"
+serde = { version = "1.0.147", features = ["derive"] }
