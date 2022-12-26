@@ -2,6 +2,8 @@
 name = "rustbase-cli"
 version = "0.2.0"
 edition = "2021"
+authors = ["Rustbase"]
+license = "MIT"
 
 [dependencies]
 tokio = { version = "1.20.1", features = ["macros", "rt-multi-thread", "net", "io-std", "io-util"] }
@@ -12,3 +14,7 @@ clap = "3.2.19"
 clap_derive = "3.2.18"
 crossterm = "0.16.0"
 serde = { version = "1.0.147", features = ["derive"] }
+tokio-rustls = "0.23.4"
+rustls-pemfile = "1.0.1"
+rustls = "0.20.7"
+webpki = "0.22.0"
