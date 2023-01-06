@@ -90,6 +90,15 @@ async fn main() -> Result<()> {
 
     let mut database = rl.readline("Database: ")?;
 
+    loop {
+        if database == "" {
+            database = rl.readline("Database: ")?;
+            continue;
+        } else {
+            break;
+        }
+    }
+
     let mut client = if args.tls {
         engine::Rustbase::connect_tls(args.host, args.port, database.clone(), args.ca_file).await
     } else {
