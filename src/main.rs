@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
     let mut database = rl.readline("Database: ")?;
 
     loop {
-        if database == "" {
+        if database.is_empty() {
             database = rl.readline("Database: ")?;
             continue;
         } else {
