@@ -6,7 +6,7 @@ authors = ["Rustbase"]
 license = "MIT"
 
 [dependencies]
-tokio = { version = "1.20.1", features = ["macros", "rt-multi-thread", "net", "io-std", "io-util"] }
+tokio = { version = "1.23.1", features = ["macros", "rt-multi-thread", "net", "io-std", "io-util"] }
 bson = "2.4.0"
 rustyline = "10.0.0"
 colored = "2.0.0"
