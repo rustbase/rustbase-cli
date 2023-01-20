@@ -4,8 +4,36 @@ mod engine;
 mod utils;
 
 use colored::Colorize;
+
+use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
-use rustyline::{Editor, Result};
+use rustyline::highlight::Highlighter;
+use rustyline::{ColorMode, Editor, Result};
+use rustyline_derive::{Completer, Helper, Hinter, Validator};
+
+use std::borrow::Cow::{self, Borrowed, Owned};
+
+use engine::{AuthConfig, RustbaseConfig, TlsConfig};
+
+#[derive(Completer, Helper, Hinter, Validator)]
+struct MaskingHighlighter {
+    masking: bool,
+}
+
+impl Highlighter for MaskingHighlighter {
+    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        use unicode_width::UnicodeWidthStr;
+        if self.masking {
+            Owned("*".repeat(line.width()))
+        } else {
+            Borrowed(line)
+        }
+    }
+
+    fn highlight_char(&self, _line: &str, _pos: usize) -> bool {
+        self.masking
+    }
+}
 
 /// A CLI for Rustbase Database Server
 #[derive(clap_derive::Parser)]
@@ -24,14 +52,33 @@ struct Args {
     #[clap(long, default_value = "")]
     ca_file: String,
 
+    /// Use authentication for connection
+    #[clap(long, short = 'a')]
+    use_auth: bool,
+
     #[clap(subcommand)]
     commands: Option<Commands>,
 }
 
+fn prompt<T>(prompt: &str, editor: &mut Editor<T>) -> Result<String>
+where
+    T: rustyline::Helper,
+{
+    let result = loop {
+        let prompt_result = editor.readline(prompt)?;
+
+        if !prompt_result.is_empty() {
+            break prompt_result;
+        }
+    };
+
+    Ok(result)
+}
+
 #[derive(clap_derive::Subcommand, PartialEq)]
 enum Commands {
-    #[clap(about = "Upgrade Rustbase and Rustbase CLI")]
-    Upgrade,
+    #[clap(about = "Update Rustbase CLI")]
+    Update,
     #[clap(about = "Clean repl history")]
     Clean,
 }
@@ -43,7 +90,7 @@ async fn main() -> Result<()> {
     let repl_path = utils::get_current_path().join("repl.history");
 
     match args.commands {
-        Some(Commands::Upgrade) => {
+        Some(Commands::Update) => {
             println!("Not implemented yet");
             return Ok(());
         }
@@ -83,27 +130,50 @@ async fn main() -> Result<()> {
     );
     println!("Press Ctrl+C to exit.");
 
-    let mut rl = Editor::<()>::new()?;
+    let h = MaskingHighlighter { masking: false };
+    let mut rl = Editor::new()?;
+    rl.set_helper(Some(h));
 
     rl.load_history(repl_path.to_str().unwrap()).ok();
     println!();
 
-    let mut database = rl.readline("Database: ")?;
+    let mut database = prompt("Database: ", &mut rl)?;
 
-    loop {
-        if database.is_empty() {
-            database = rl.readline("Database: ")?;
-            continue;
-        } else {
-            break;
-        }
-    }
+    let auth_config = if args.use_auth {
+        let username = prompt("Username: ", &mut rl)?;
 
-    let mut client = if args.tls {
-        engine::Rustbase::connect_tls(args.host, args.port, database.clone(), args.ca_file).await
+        rl.helper_mut().expect("No helper").masking = true;
+        rl.set_color_mode(ColorMode::Forced); // force masking
+        rl.set_auto_add_history(false); // make sure password is not added to history
+
+        let password = prompt("Password: ", &mut rl)?;
+
+        rl.helper_mut().expect("No helper").masking = false;
+        rl.set_color_mode(ColorMode::Disabled);
+        rl.set_auto_add_history(true);
+
+        Some(AuthConfig { username, password })
     } else {
-        engine::Rustbase::connect(args.host, args.port, database.clone()).await
+        None
     };
+
+    let tls_config = if args.tls {
+        let ca_file = args.ca_file;
+
+        Some(TlsConfig { ca_file })
+    } else {
+        None
+    };
+
+    let config = RustbaseConfig {
+        database: database.clone(),
+        port: args.port,
+        host: args.host,
+        auth: auth_config,
+        tls: tls_config,
+    };
+
+    let mut client = engine::Rustbase::connect(config).await;
 
     loop {
         let readline = rl.readline(format!("{}> ", database).as_str());
