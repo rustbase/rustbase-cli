@@ -2,16 +2,26 @@
 A [Rustbase](https://github.com/rustbase/rustbase) CLI Client.
 
 # ⚠️ Warning
-This is a work in progress. *Current available only for Linux*.
+This is a work in progress.
 
 Join our [discord server](https://discord.gg/m5ZzWPumbd) to get help and discuss features.
+
+# Supported platforms
+
+|         | Windows | Linux | MacOS |
+| ------- | ------- | ----- | ----- |
+| i686    | ✅       | ✅     | -     |
+| x64     | ✅       | ✅     | -     |
+| aarch64 | -       | -     | -     |
+| arm     | -       | -     | -     |
+
 
 # 🔗 Contribute
 [Click here](./CONTRIBUTING.md) to see how to Contribute
 
 # Usage
 ## Dependencies
- -  Rustbase needs to be running on host.
+ -  Rustbase needs to be running on host url.
 
 
 ```bash
