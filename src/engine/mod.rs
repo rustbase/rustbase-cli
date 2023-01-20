@@ -1,11 +1,13 @@
 use colored::Colorize;
 use rustls::OwnedTrustAnchor;
 use serde::{Deserialize, Serialize};
+
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
@@ -109,8 +111,7 @@ impl Rustbase {
         }
     }
 
-    pub async fn request(&mut self, request: Request) {
-        let client = self.client.as_mut().unwrap();
+    pub async fn request(&mut self, request: Request, tls: bool) {
         match request {
             Request::Query(query) => {
                 let doc = bson::doc! {
@@ -120,15 +121,21 @@ impl Rustbase {
                     },
                 };
 
-                client
-                    .write_all(&bson::to_vec(&doc).unwrap())
+                let response = if !tls {
+                    Rustbase::send_and_receive(
+                        self.client.as_mut().unwrap(),
+                        bson::to_vec(&doc).unwrap(),
+                    )
                     .await
-                    .unwrap();
+                } else {
+                    Rustbase::send_and_receive(
+                        self.tls_client.as_mut().unwrap(),
+                        bson::to_vec(&doc).unwrap(),
+                    )
+                    .await
+                };
 
-                let mut buf = vec![0; BUFFER_SIZE];
-                let n = client.read(&mut buf).await.unwrap();
-
-                let doc: Response = bson::from_slice(&buf[..n]).unwrap();
+                let doc: Response = bson::from_slice(&response).unwrap();
 
                 match doc.status {
                     Status::Ok => {
@@ -152,47 +159,28 @@ impl Rustbase {
         }
     }
 
-    pub async fn request_tls(&mut self, request: Request) {
-        let client = self.tls_client.as_mut().unwrap();
-        match request {
-            Request::Query(query) => {
-                let doc = bson::doc! {
-                    "body": {
-                        "query": query,
-                        "database": self.database.clone(),
-                    },
-                };
+    async fn send_and_receive<IO>(client: &mut IO, data: Vec<u8>) -> Vec<u8>
+    where
+        IO: AsyncRead + AsyncWrite + Unpin,
+    {
+        let mut buffer = vec![0; BUFFER_SIZE];
+        let mut final_buffer = Vec::new();
 
-                client
-                    .write_all(&bson::to_vec(&doc).unwrap())
-                    .await
-                    .unwrap();
+        client.write_all(&data).await.unwrap();
 
-                let mut buf = vec![0; BUFFER_SIZE];
-                let n = client.read(&mut buf).await.unwrap();
+        while let Ok(n) = client.read(&mut buffer).await {
+            if n == 0 {
+                println!("[Wirewave] connection closed");
+                break;
+            }
 
-                let doc: Response = bson::from_slice(&buf[..n]).unwrap();
-
-                match doc.status {
-                    Status::Ok => {
-                        if doc.body.is_some() {
-                            println!("{}", doc.body.unwrap());
-                        } else {
-                            println!("{} Ok", "[Success]".green());
-                        }
-                    }
-
-                    Status::SyntaxError => {
-                        println!("{}", "[Error]".red());
-                        println!("{}", doc.message.unwrap());
-                    }
-
-                    _ => {
-                        println!("{} {}", "[Error]".red(), status_string(doc.status));
-                    }
-                }
+            final_buffer.extend_from_slice(&buffer[..n]);
+            if n < BUFFER_SIZE {
+                break;
             }
         }
+
+        final_buffer
     }
 }
 
