@@ -11,6 +11,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
+mod auth;
+
 #[derive(Debug)]
 pub enum Request {
     Query(String),
@@ -39,34 +41,65 @@ pub enum Status {
     InvalidAuth,
 }
 
-pub struct Rustbase {
+#[derive(Clone)]
+pub struct RustbaseConfig {
+    pub tls: Option<TlsConfig>,
     pub host: String,
+    pub port: String,
+    pub database: String,
+    pub auth: Option<AuthConfig>,
+}
+
+#[derive(Clone)]
+pub struct TlsConfig {
+    pub ca_file: String,
+}
+
+#[derive(Clone)]
+pub struct AuthConfig {
+    pub username: String,
+    pub password: String,
+}
+
+pub struct Rustbase {
     pub client: Option<TcpStream>,
     pub database: String,
     pub tls_client: Option<TlsStream<TcpStream>>,
 }
 
 impl Rustbase {
-    pub async fn connect(host: String, port: String, database: String) -> Rustbase {
-        let client = TcpStream::connect(format!("{}:{}", host, port))
+    pub async fn connect(config: RustbaseConfig) -> Rustbase {
+        if config.clone().tls.is_some() {
+            let mut rb = Rustbase::connect_tls(config.clone()).await;
+
+            if let Some(auth) = config.auth {
+                let client = rb.tls_client.as_mut().unwrap();
+
+                auth::auth(auth, client).await;
+            }
+
+            return rb;
+        }
+
+        let mut client = TcpStream::connect(format!("{}:{}", config.host, config.port))
             .await
             .unwrap();
 
+        if let Some(auth) = config.auth {
+            auth::auth(auth, &mut client).await;
+        }
+
         Rustbase {
             client: Some(client),
-            database,
+            database: config.database,
             tls_client: None,
-            host,
         }
     }
 
-    pub async fn connect_tls(
-        host: String,
-        port: String,
-        database: String,
-        ca_file: String,
-    ) -> Rustbase {
-        if !Path::new(&ca_file).exists() {
+    async fn connect_tls(config: RustbaseConfig) -> Rustbase {
+        let tls = config.tls.unwrap();
+
+        if !Path::new(&tls.ca_file).exists() {
             println!(
                 "{} CA file not found: use --ca_file=<path>",
                 "[Error]".red()
@@ -74,7 +107,7 @@ impl Rustbase {
         }
 
         let mut root_cert_store = rustls::RootCertStore::empty();
-        let mut pem = BufReader::new(File::open(ca_file).unwrap());
+        let mut pem = BufReader::new(File::open(tls.ca_file).unwrap());
         let certs = rustls_pemfile::certs(&mut pem).unwrap();
         let trust_anchors = certs.iter().map(|cert| {
             let ta = webpki::TrustAnchor::try_from_cert_der(&cert[..]).unwrap();
@@ -86,18 +119,18 @@ impl Rustbase {
         });
         root_cert_store.add_server_trust_anchors(trust_anchors);
 
-        let config = rustls::ClientConfig::builder()
+        let client_config = rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_root_certificates(root_cert_store)
             .with_no_client_auth();
 
-        let connector = TlsConnector::from(Arc::new(config));
+        let connector = TlsConnector::from(Arc::new(client_config));
 
-        let domain = rustls::ServerName::try_from(host.as_str())
+        let domain = rustls::ServerName::try_from(config.host.as_str())
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid dnsname"))
             .unwrap();
 
-        let client = TcpStream::connect(format!("{}:{}", host, port))
+        let client = TcpStream::connect(format!("{}:{}", config.host, config.port))
             .await
             .unwrap();
 
@@ -105,9 +138,8 @@ impl Rustbase {
 
         Rustbase {
             client: None,
-            database,
+            database: config.database,
             tls_client: Some(tls_client),
-            host,
         }
     }
 
