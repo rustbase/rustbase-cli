@@ -192,7 +192,7 @@ async fn main() -> Result<()> {
                 }
 
                 if !line.is_empty() {
-                    client.request(engine::Request::Query(line), args.tls).await;
+                    client.request_query(line, args.tls).await;
                 }
             }
             Err(ReadlineError::Interrupted) => {

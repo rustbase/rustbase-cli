@@ -13,32 +13,61 @@ use tokio_rustls::{client::TlsStream, TlsConnector};
 
 mod auth;
 
-#[derive(Debug)]
-pub enum Request {
-    Query(String),
-}
-
 const BUFFER_SIZE: usize = 1024 * 8;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Response {
-    pub message: Option<String>,
-    pub status: Status,
+    pub header: ResHeader,
     pub body: Option<bson::Bson>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ResHeader {
+    pub status: Status,
+    pub messages: Option<Vec<String>>,
+    pub is_error: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Request {
+    pub body: bson::Document,
+    pub header: ReqHeader,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ReqHeader {
+    #[serde(rename = "type")]
+    pub type_: Type,
+    pub auth: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum Type {
+    Query,
+    Ping,
+    PreRequest,
+    Cluster,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Status {
     Ok,
-    Error,
-    DatabaseNotFound,
-    KeyNotExists,
-    KeyAlreadyExists,
-    SyntaxError,
+    Inserted,
+    Updated,
+
+    // ----
     InvalidQuery,
-    InvalidBody,
-    InvalidBson,
-    InvalidAuth,
+    NotFound,
+    AlreadyExists,
+    BadBson,
+    BadAuth,
+    BadBody,
+    NotAuthorized,
+    Reserved,
+    SyntaxError,
+
+    // ----
+    InternalError,
 }
 
 #[derive(Clone)]
@@ -143,48 +172,52 @@ impl Rustbase {
         }
     }
 
-    pub async fn request(&mut self, request: Request, tls: bool) {
-        match request {
-            Request::Query(query) => {
-                let doc = bson::doc! {
-                    "body": {
-                        "query": query,
-                        "database": self.database.clone(),
-                    },
-                };
+    pub async fn request_query(&mut self, query: String, tls: bool) {
+        let body = bson::doc! {
+            "query": query,
+            "database": self.database.clone(),
+        };
 
-                let response = if !tls {
-                    Rustbase::send_and_receive(
-                        self.client.as_mut().unwrap(),
-                        bson::to_vec(&doc).unwrap(),
-                    )
-                    .await
+        let doc = Request {
+            body,
+            header: ReqHeader {
+                type_: Type::Query,
+                auth: None,
+            },
+        };
+
+        let response = if !tls {
+            Rustbase::send_and_receive(self.client.as_mut().unwrap(), bson::to_vec(&doc).unwrap())
+                .await
+        } else {
+            Rustbase::send_and_receive(
+                self.tls_client.as_mut().unwrap(),
+                bson::to_vec(&doc).unwrap(),
+            )
+            .await
+        };
+
+        let doc: Response = bson::from_slice(&response).unwrap();
+
+        match doc.header.status {
+            Status::Ok | Status::Inserted | Status::Updated => {
+                if doc.body.is_some() {
+                    println!("{}", doc.body.unwrap());
                 } else {
-                    Rustbase::send_and_receive(
-                        self.tls_client.as_mut().unwrap(),
-                        bson::to_vec(&doc).unwrap(),
-                    )
-                    .await
-                };
+                    println!("{} {:?}", "[Success]".green(), doc.header.status);
+                }
+            }
 
-                let doc: Response = bson::from_slice(&response).unwrap();
+            _ => {
+                if let Some(messages) = doc.header.messages {
+                    if messages.len() > 1 {
+                        println!("{} server gave following errors: ", "[Error]".red());
 
-                match doc.status {
-                    Status::Ok => {
-                        if doc.body.is_some() {
-                            println!("{}", doc.body.unwrap());
-                        } else {
-                            println!("{} Ok", "[Success]".green());
+                        for message in messages {
+                            println!("{} {}", "[Error]".red(), message);
                         }
-                    }
-
-                    Status::SyntaxError => {
-                        println!("{}", "[Error]".red());
-                        println!("{}", doc.message.unwrap());
-                    }
-
-                    _ => {
-                        println!("{} {}", "[Error]".red(), status_string(doc.status));
+                    } else {
+                        println!("{} {}", "[Error]".red(), messages[0]);
                     }
                 }
             }
@@ -213,20 +246,5 @@ impl Rustbase {
         }
 
         final_buffer
-    }
-}
-
-pub fn status_string(status: Status) -> String {
-    match status {
-        Status::Ok => "Ok".to_string(),
-        Status::Error => "Error".to_string(),
-        Status::DatabaseNotFound => "DatabaseNotFound".to_string(),
-        Status::KeyNotExists => "KeyNotExists".to_string(),
-        Status::KeyAlreadyExists => "KeyAlreadyExists".to_string(),
-        Status::SyntaxError => "SyntaxError".to_string(),
-        Status::InvalidQuery => "InvalidQuery".to_string(),
-        Status::InvalidBody => "InvalidBody".to_string(),
-        Status::InvalidBson => "InvalidBson".to_string(),
-        Status::InvalidAuth => "InvalidAuth".to_string(),
     }
 }
